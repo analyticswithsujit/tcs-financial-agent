@@ -1,6 +1,6 @@
 # TCS Financial Forecasting Agent
 
-A LangChain-powered FastAPI service that analyses Tata Consultancy Services (TCS) quarterly financial reports and earnings-call transcripts to generate structured JSON forecasts using **Google Gemini (gemini-flash-latest)**.
+A LangChain-powered FastAPI service that analyses Tata Consultancy Services (TCS) quarterly financial reports and earnings-call transcripts to generate structured JSON forecasts using **Google Gemini**.
 
 This project only needs a free Gemini API key from Google AI Studio — no paid Google Cloud / Vertex AI project, billing account, or service account is required. (Note: free-tier keys are capped at ~20 requests/day per model, which is enough for testing but may need a short wait between forecast runs.)
 
@@ -16,6 +16,8 @@ You only need **two things** installed before running:
 | **Git** | https://git-scm.com/downloads |
 
 No Python, no MySQL, no pip — Docker handles everything else.
+
+> **Why Docker?** The project depends on MySQL 8.0, Tesseract OCR, and Poppler — three system-level packages that are painful to install manually on Windows. Docker bundles all of it: one command starts the database, the app, and every system dependency with zero manual setup.
 
 ---
 
@@ -130,10 +132,10 @@ docker compose logs -f
 ```
 FastAPI (POST /forecast/tcs)
     └── ForecastAgent (sequential tool pipeline + synthesis)
-            ├── financial_data_extractor  → ChromaDB → Gemini (gemini-flash-latest)
-            ├── qualitative_analysis_tool → ChromaDB RAG → Gemini (gemini-flash-latest)
-            └── market_data_tool          → yfinance live data (optional)
-                        ↓
+            ├── financial_data_extractor  --> ChromaDB --> Gemini (with model fallback)
+            ├── qualitative_analysis_tool --> ChromaDB RAG --> Gemini (with model fallback)
+            └── market_data_tool          --> yfinance live data (optional)
+                        |
                   MySQL 8.0 (async SQLAlchemy + aiomysql)
 ```
 
@@ -142,13 +144,25 @@ FastAPI (POST /forecast/tcs)
 | Component | Choice |
 |---|---|
 | Framework | FastAPI + Uvicorn |
-| LLM | Google Gemini `gemini-flash-latest` (`langchain-google-genai`) |
+| LLM | Google Gemini — auto-fallback: `gemini-flash-latest` → `gemini-1.5-flash` → `gemini-1.5-pro` |
 | Agent | Sequential LangChain tool calls + single Gemini synthesis call |
 | Embeddings | Google `gemini-embedding-001` |
 | Vector Store | ChromaDB (persistent, cosine similarity) |
 | PDF Extraction | pdfplumber + pytesseract OCR fallback |
 | Database | MySQL 8.0 (async SQLAlchemy 2.0 + aiomysql) |
 | Containers | Docker Compose |
+
+---
+
+## Model Fallback
+
+Every LLM call goes through `app/utils/llm_factory.py`, which tries models in this order:
+
+```
+gemini-flash-latest  -->  gemini-1.5-flash  -->  gemini-1.5-pro
+```
+
+Fallback is triggered only on retryable errors (HTTP 429 quota exhausted, 503 service unavailable). Auth errors (`API_KEY_INVALID`) and content-policy rejections fail immediately — retrying with another model won't help. The embedding model is never changed by the fallback.
 
 ---
 
@@ -159,7 +173,7 @@ The setup script creates `.env` automatically. You can edit it manually if neede
 | Variable | Default | Description |
 |---|---|---|
 | `GOOGLE_API_KEY` | – | **Required** — from aistudio.google.com |
-| `GOOGLE_MODEL` | `gemini-flash-latest` | Gemini model |
+| `GOOGLE_MODEL` | `gemini-flash-latest` | Primary Gemini model (fallback chain kicks in on errors) |
 | `MYSQL_PASSWORD` | `tcsagent2024` | MySQL root password |
 | `MYSQL_DB` | `tcs_forecast` | Database name |
 | `CHROMA_PERSIST_DIR` | `./chroma_db` | ChromaDB storage |
@@ -170,24 +184,26 @@ The setup script creates `.env` automatically. You can edit it manually if neede
 
 ```
 tcs-financial-agent/
-├── setup.bat                        ← Windows: double-click to run
-├── setup.sh                         ← Mac/Linux: ./setup.sh
-├── docker-compose.yml               ← MySQL + app services
-├── Dockerfile                       ← Python 3.11 + tesseract + poppler
+├── setup.bat                        <- Windows: double-click to run
+├── setup.sh                         <- Mac/Linux: ./setup.sh
+├── docker-compose.yml               <- MySQL + app services
+├── Dockerfile                       <- Python 3.11 + tesseract + poppler
 ├── requirements.txt
 ├── .env.example
 └── app/
-    ├── agents/forecast_agent.py     ← ForecastAgent (Gemini + LangChain)
-    ├── api/endpoints.py             ← FastAPI routes
-    ├── db/mysql_client.py           ← Async MySQL (SQLAlchemy)
+    ├── agents/forecast_agent.py     <- ForecastAgent (sequential pipeline)
+    ├── api/endpoints.py             <- FastAPI routes
+    ├── db/mysql_client.py           <- Async MySQL (SQLAlchemy)
     ├── rag/
-    │   ├── document_loader.py       ← Downloads TCS PDFs from screener.in
-    │   ├── chunker.py               ← pdfplumber + OCR chunking
-    │   └── vector_store.py          ← ChromaDB wrapper
+    │   ├── document_loader.py       <- Downloads TCS PDFs from screener.in
+    │   ├── chunker.py               <- pdfplumber + OCR chunking
+    │   └── vector_store.py          <- ChromaDB wrapper
     ├── tools/
-    │   ├── financial_extractor_tool.py   ← @tool: extract metrics
-    │   ├── qualitative_analysis_tool.py  ← @tool: RAG sentiment analysis
-    │   └── market_data_tool.py           ← @tool: live yfinance data
+    │   ├── financial_extractor_tool.py   <- @tool: extract metrics
+    │   ├── qualitative_analysis_tool.py  <- @tool: RAG sentiment analysis
+    │   └── market_data_tool.py           <- @tool: live yfinance data
+    ├── utils/
+    │   └── llm_factory.py           <- Model fallback chain
     ├── schemas/forecast.py
     ├── config.py
     └── main.py
@@ -210,4 +226,4 @@ tcs-financial-agent/
 → Change the port in `docker-compose.yml` from `"8000:8000"` to `"8001:8000"` and access via `localhost:8001`.
 
 **`429 ... generate_content_free_tier_requests, limit: 20` error**
-→ Free-tier AI Studio keys are capped at 20 Gemini requests/day per model. This resets roughly every 24h. Either wait for the reset, or enable billing on the Google Cloud project behind your key to remove the cap.
+→ Free-tier keys are capped at 20 requests/day **per model**. The agent automatically falls back across the model chain (`gemini-flash-latest` → `gemini-1.5-flash` → `gemini-1.5-pro`), so all three models must be exhausted before you hit this wall. Either wait ~24 h for the quota to reset, or enable billing on your Google Cloud project to remove the cap.

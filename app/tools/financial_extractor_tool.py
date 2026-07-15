@@ -4,16 +4,18 @@ app/tools/financial_extractor_tool.py - LangChain tool for extracting TCS financ
 BUG FIX: EXTRACTION_PROMPT schema example uses {{ / }} (doubled braces) so that
 Python str.format(context=...) does not treat them as format placeholders,
 which would raise a KeyError at runtime.
+
+Fallback: uses invoke_with_fallback() so a 429 on gemini-flash-latest
+automatically retries with gemini-1.5-flash, then gemini-1.5-pro.
 """
 import json
 import logging
 import time
 
 from langchain.tools import tool
-from langchain_google_genai import ChatGoogleGenerativeAI
 
-from app.config import get_settings
 from app.rag.vector_store import similarity_search
+from app.utils.llm_factory import invoke_with_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -60,15 +62,6 @@ def financial_data_extractor(query: str) -> str:
     financial reports stored in ChromaDB. Input should be a natural-language
     description of what financial data you need.
     """
-    cfg = get_settings()
-    model = ChatGoogleGenerativeAI(
-        model=cfg.google_model,
-        google_api_key=cfg.google_api_key,
-        temperature=0,
-        max_output_tokens=1500,
-        thinking_budget=0,
-    )
-
     chunks = _retrieve_financial_chunks(query, k=8)
     if not chunks:
         return json.dumps({"error": "No financial documents found in vector store."})
@@ -76,16 +69,26 @@ def financial_data_extractor(query: str) -> str:
     context = _format_context(chunks)
     prompt = EXTRACTION_PROMPT.format(context=context)
 
+    last_exc = None
     for attempt in range(1, 4):
         try:
-            response = model.invoke(prompt, generation_config={"response_mime_type": "application/json"})
-            raw = response.content
+            # invoke_with_fallback handles model-level fallback automatically;
+            # this outer loop handles transient JSON parse / network errors.
+            raw, model_used = invoke_with_fallback(
+                prompt,
+                generation_config={"response_mime_type": "application/json"},
+                max_output_tokens=1500,
+            )
             result = json.loads(raw)
-            logger.info("financial_data_extractor: extracted %d quarter(s)", len(result.get("quarters", [])))
+            logger.info(
+                "financial_data_extractor: extracted %d quarter(s) via %s",
+                len(result.get("quarters", [])), model_used,
+            )
             return json.dumps(result)
         except Exception as exc:
+            last_exc = exc
             logger.warning("Attempt %d failed: %s", attempt, exc)
             if attempt < 3:
                 time.sleep(2 ** attempt)
 
-    return json.dumps({"error": "Failed to extract financial metrics after 3 attempts"})
+    return json.dumps({"error": f"Failed to extract financial metrics after 3 attempts: {last_exc}"})

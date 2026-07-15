@@ -1,14 +1,16 @@
 """
 app/tools/qualitative_analysis_tool.py - RAG-based qualitative analysis of TCS earnings calls.
+
+Fallback: uses invoke_with_fallback() so a 429 on the primary model
+automatically retries with gemini-1.5-flash, then gemini-1.5-pro.
 """
 import json
 import logging
 
 from langchain.tools import tool
-from langchain_google_genai import ChatGoogleGenerativeAI
 
-from app.config import get_settings
 from app.rag.vector_store import similarity_search
+from app.utils.llm_factory import invoke_with_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -85,15 +87,6 @@ def qualitative_analysis_tool(query: str) -> str:
     and risks, then synthesises a structured sentiment summary. Input can be
     any question about TCS management tone or outlook.
     """
-    cfg = get_settings()
-    model = ChatGoogleGenerativeAI(
-        model=cfg.google_model,
-        google_api_key=cfg.google_api_key,
-        temperature=0,
-        max_output_tokens=1200,
-        thinking_budget=0,
-    )
-
     chunks = _multi_retrieve(k_per_query=4)
     if not chunks:
         return json.dumps({"error": "No concall documents found in vector store."})
@@ -103,15 +96,19 @@ def qualitative_analysis_tool(query: str) -> str:
     prompt = ANALYSIS_PROMPT.format(context=context)
 
     try:
-        response = model.invoke(prompt, generation_config={"response_mime_type": "application/json"})
-        raw = response.content
+        raw, model_used = invoke_with_fallback(
+            prompt,
+            generation_config={"response_mime_type": "application/json"},
+            max_output_tokens=1200,
+        )
         result = json.loads(raw)
         llm_score = float(result.get("sentiment_score", heuristic_score))
         result["sentiment_score"] = round((llm_score + heuristic_score) / 2, 2)
         logger.info(
-            "qualitative_analysis_tool: tone=%s, sentiment=%.2f",
+            "qualitative_analysis_tool: tone=%s, sentiment=%.2f (via %s)",
             result.get("management_tone", "?"),
             result["sentiment_score"],
+            model_used,
         )
         return json.dumps(result)
     except Exception as exc:

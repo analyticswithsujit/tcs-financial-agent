@@ -13,13 +13,13 @@ Key design decisions vs friend's project:
     calling the tools directly sidesteps the issue entirely and also cuts
     the number of LLM round-trips per request.
   - ChromaDB persistent store instead of FAISS in-memory
+  - Automatic model fallback: gemini-flash-latest → gemini-1.5-flash →
+    gemini-1.5-pro on 429 / 503 / quota errors (see app/utils/llm_factory.py)
 """
 import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.config import get_settings
 from app.rag.chunker import load_and_chunk
@@ -28,6 +28,7 @@ from app.rag.vector_store import ingest_documents, is_populated
 from app.tools.financial_extractor_tool import financial_data_extractor
 from app.tools.market_data_tool import market_data_tool
 from app.tools.qualitative_analysis_tool import qualitative_analysis_tool
+from app.utils.llm_factory import invoke_with_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -87,17 +88,17 @@ class ForecastAgent:
     ForecastAgent that runs the financial/qualitative/market tools as a fixed
     sequential pipeline, then makes a single LLM call to synthesise the
     structured JSON forecast from their combined output.
+
+    Model fallback is handled transparently by invoke_with_fallback():
+    if the primary model (from config) returns a 429 / 503 / quota error,
+    the call is automatically retried with gemini-1.5-flash, then
+    gemini-1.5-pro. Auth and content-policy errors are not retried.
     """
 
     def __init__(self):
         cfg = get_settings()
-        self.llm = ChatGoogleGenerativeAI(
-            model=cfg.google_model,
-            google_api_key=cfg.google_api_key,
-            temperature=0,
-            thinking_budget=0,
-        )
-        logger.info("ForecastAgent initialised (LLM: %s)", cfg.google_model)
+        self._primary_model = cfg.google_model
+        logger.info("ForecastAgent initialised (primary LLM: %s)", self._primary_model)
 
     def _parse_output(self, raw: str) -> dict:
         cleaned = raw.strip()
@@ -145,8 +146,8 @@ class ForecastAgent:
             market_data=market_data,
         )
 
-        response = self.llm.invoke(prompt)
-        raw_output = response.content
+        # invoke_with_fallback returns (content, model_actually_used)
+        raw_output, model_used = invoke_with_fallback(prompt)
 
         forecast = self._parse_output(raw_output)
         forecast["_metadata"] = {
@@ -155,7 +156,7 @@ class ForecastAgent:
             "tools_used": tools_used,
             "analysis_date": datetime.now(timezone.utc).isoformat(),
             "llm_provider": "google",
-            "llm_model": self.llm.model,
+            "llm_model": model_used,
         }
 
         return {
