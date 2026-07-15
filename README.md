@@ -2,6 +2,8 @@
 
 A LangChain-powered FastAPI service that analyses Tata Consultancy Services (TCS) quarterly financial reports and earnings-call transcripts to generate structured JSON forecasts using **Google Gemini (gemini-flash-latest)**.
 
+This project only needs a free Gemini API key from Google AI Studio — no paid Google Cloud / Vertex AI project, billing account, or service account is required. (Note: free-tier keys are capped at ~20 requests/day per model, which is enough for testing but may need a short wait between forecast runs.)
+
 ---
 
 ## Prerequisites
