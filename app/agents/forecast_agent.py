@@ -39,9 +39,20 @@ SYNTHESIS_PROMPT = (
     "Below is data already extracted for the last {quarters} quarter(s) by dedicated "
     "extraction tools. Synthesise it into a single structured JSON forecast for the "
     "upcoming quarter.\n\n"
-    "Financial metrics (from financial_data_extractor):\n{financial_data}\n\n"
+    "Financial metrics (from financial_data_extractor - historical actuals for each of the "
+    "last {quarters} reported quarter(s), most recent first):\n{financial_data}\n\n"
     "Qualitative analysis (from qualitative_analysis_tool):\n{qualitative_data}\n\n"
     "Market snapshot (from market_data_tool, only present if requested):\n{market_data}\n\n"
+    "How to derive financial_metrics for the UPCOMING quarter (which has not been reported "
+    "yet, so there are no actuals for it):\n"
+    "- Take the most recent reported quarter's actuals as your baseline.\n"
+    "- If the historical quarters show a clear trend (e.g. QoQ/YoY growth rate, margin "
+    "direction), extrapolate that trend forward one quarter. Prefix extrapolated figures "
+    "with '~' (e.g. \"~65,000\") to signal they are estimates, not reported actuals.\n"
+    "- Only leave a field null if the historical data provided genuinely has no basis for "
+    "even a rough estimate (e.g. the metric was never extracted for any quarter).\n"
+    "- Do not invent a number that has no relationship to the historical data - extrapolating "
+    "from a real trend is expected and required; inventing an unrelated figure is not.\n\n"
     "CRITICAL - your response must be ONLY valid JSON (no markdown, no prose):\n\n"
     '{{\n'
     '  "quarter_forecast": "<upcoming quarter label, e.g. Q1 FY27>",\n'
@@ -66,8 +77,10 @@ SYNTHESIS_PROMPT = (
     '  "source_documents": ["<filename>"]\n'
     '}}\n\n'
     "Rules:\n"
-    "- Never fabricate numbers. Only use the data provided above.\n"
-    "- Set confidence_score 0.0-1.0 based on data completeness.\n"
+    "- Every number must be either a reported actual or a trend-based extrapolation from "
+    "the data provided above (marked with '~'). Never invent a figure with no basis in it.\n"
+    "- Set confidence_score 0.0-1.0 based on data completeness (extrapolated financial_metrics "
+    "should lower confidence_score somewhat versus having actual reported figures).\n"
     "- market_snapshot = null unless market data was provided above."
 )
 

@@ -58,7 +58,6 @@ _FATAL_MARKERS = (
     "401",
     "403",
     "permission denied",
-    "billing",
     "content_filter",
     "content filter",
     "safety",

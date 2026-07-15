@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TCS Financial Forecasting Agent</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+
+    .spinner {
+      border: 3px solid #e2e8f0;
+      border-top: 3px solid #3b82f6;
+      border-radius: 50%;
+      width: 24px; height: 24px;
+      animation: spin 0.8s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .step-pulse {
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .fade-in {
+      animation: fadeIn 0.5s ease-in;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .metric-card:hover { transform: translateY(-2px); transition: transform 0.2s; }
+
+    .tone-positive { background: #dcfce7; color: #166534; }
+    .tone-cautious  { background: #fef9c3; color: #854d0e; }
+    .tone-negative  { background: #fee2e2; color: #991b1b; }
+
+    .confidence-bar {
+      height: 8px; border-radius: 4px; background: #e2e8f0;
+      overflow: hidden;
+    }
+    .confidence-fill {
+      height: 100%; border-radius: 4px;
+      background: linear-gradient(90deg, #3b82f6, #06b6d4);
+      transition: width 1s ease;
+    }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-gradient-to-r from-slate-900 to-blue-900 text-white shadow-lg">
+    <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="bg-blue-500 rounded-lg p-2">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold tracking-tight">TCS Financial Forecasting Agent</h1>
+          <p class="text-blue-300 text-xs mt-0.5">Powered by Google Gemini · LangChain · ChromaDB</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <div id="health-dot" class="w-2 h-2 rounded-full bg-slate-500"></div>
+        <span id="health-label" class="text-xs text-slate-400">checking...</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-8">
+
+    <!-- Input Form -->
+    <div id="form-section" class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-6">
+      <h2 class="text-slate-800 font-semibold text-lg mb-1">Generate Forecast</h2>
+      <p class="text-slate-500 text-sm mb-5">Analyse TCS quarterly reports and earnings calls to forecast the upcoming quarter.</p>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+        <!-- Ticker -->
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1.5">Stock Ticker</label>
+          <input id="ticker" type="text" value="TCS" maxlength="10"
+            class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm font-mono font-semibold text-slate-800 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent uppercase" />
+        </div>
+
+        <!-- Quarters -->
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1.5">
+            Quarters to Analyse: <span id="quarters-label" class="text-blue-600 font-semibold">3</span>
+          </label>
+          <input id="quarters" type="range" min="1" max="4" value="3"
+            oninput="document.getElementById('quarters-label').textContent=this.value"
+            class="w-full accent-blue-600 mt-2" />
+          <div class="flex justify-between text-xs text-slate-400 mt-1">
+            <span>1 quarter</span><span>4 quarters</span>
+          </div>
+        </div>
+
+        <!-- Market Data -->
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1.5">Live Market Data</label>
+          <div class="flex items-center gap-3 mt-2.5">
+            <button id="market-toggle" onclick="toggleMarket()"
+              class="relative inline-flex h-6 w-11 items-center rounded-full bg-slate-200 transition-colors focus:outline-none">
+              <span id="market-thumb"
+                class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform translate-x-1"></span>
+            </button>
+            <span id="market-label" class="text-sm text-slate-500">Disabled</span>
+          </div>
+          <p class="text-xs text-slate-400 mt-1.5">Fetches current NSE price via yfinance</p>
+        </div>
+      </div>
+
+      <button id="run-btn" onclick="runForecast()"
+        class="w-full md:w-auto bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold px-8 py-3 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+        Run Forecast
+      </button>
+    </div>
+
+    <!-- Loading State -->
+    <div id="loading-section" class="hidden bg-white rounded-2xl shadow-sm border border-slate-200 p-8 mb-6">
+      <div class="flex flex-col items-center text-center">
+        <div class="spinner mb-4"></div>
+        <h3 class="text-slate-800 font-semibold text-lg mb-1">Analysing TCS Financials</h3>
+        <p id="loading-step" class="text-slate-500 text-sm mb-6 step-pulse">Initialising agent...</p>
+
+        <!-- Step progress -->
+        <div class="w-full max-w-md space-y-3 text-left">
+          <div class="step-item flex items-center gap-3" data-step="0">
+            <div class="step-icon w-7 h-7 rounded-full border-2 border-slate-200 flex items-center justify-center flex-shrink-0">
+              <span class="text-xs text-slate-400">1</span>
+            </div>
+            <span class="text-sm text-slate-500">Download TCS financial documents</span>
+          </div>
+          <div class="step-item flex items-center gap-3" data-step="1">
+            <div class="step-icon w-7 h-7 rounded-full border-2 border-slate-200 flex items-center justify-center flex-shrink-0">
+              <span class="text-xs text-slate-400">2</span>
+            </div>
+            <span class="text-sm text-slate-500">Index into ChromaDB vector store</span>
+          </div>
+          <div class="step-item flex items-center gap-3" data-step="2">
+            <div class="step-icon w-7 h-7 rounded-full border-2 border-slate-200 flex items-center justify-center flex-shrink-0">
+              <span class="text-xs text-slate-400">3</span>
+            </div>
+            <span class="text-sm text-slate-500">Extract financial metrics (Gemini)</span>
+          </div>
+          <div class="step-item flex items-center gap-3" data-step="3">
+            <div class="step-icon w-7 h-7 rounded-full border-2 border-slate-200 flex items-center justify-center flex-shrink-0">
+              <span class="text-xs text-slate-400">4</span>
+            </div>
+            <span class="text-sm text-slate-500">Analyse earnings call transcripts (RAG)</span>
+          </div>
+          <div class="step-item flex items-center gap-3" data-step="4">
+            <div class="step-icon w-7 h-7 rounded-full border-2 border-slate-200 flex items-center justify-center flex-shrink-0">
+              <span class="text-xs text-slate-400">5</span>
+            </div>
+            <span class="text-sm text-slate-500">Synthesise forecast</span>
+          </div>
+        </div>
+
+        <p class="text-xs text-slate-400 mt-6">First run downloads documents and may take 2–3 minutes. Subsequent runs are fast.</p>
+      </div>
+    </div>
+
+    <!-- Error Banner -->
+    <div id="error-section" class="hidden bg-red-50 border border-red-200 rounded-2xl p-5 mb-6">
+      <div class="flex gap-3 items-start">
+        <svg class="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <div>
+          <p class="text-red-800 font-medium text-sm">Forecast failed</p>
+          <p id="error-msg" class="text-red-600 text-sm mt-0.5"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results Section -->
+    <div id="results-section" class="hidden fade-in space-y-5">
+
+      <!-- Forecast Banner -->
+      <div class="bg-gradient-to-r from-blue-600 to-cyan-600 rounded-2xl p-6 text-white">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <p class="text-blue-200 text-xs font-medium uppercase tracking-widest mb-1">Quarter Forecast</p>
+            <h2 id="res-quarter" class="text-3xl font-bold">—</h2>
+            <p id="res-ticker" class="text-blue-200 text-sm mt-1">—</p>
+          </div>
+          <div class="flex flex-col items-start md:items-end gap-3">
+            <div class="flex items-center gap-2">
+              <span id="res-tone-badge" class="px-3 py-1 rounded-full text-xs font-semibold bg-white/20 text-white">—</span>
+            </div>
+            <div class="w-48">
+              <div class="flex justify-between text-xs text-blue-200 mb-1">
+                <span>Confidence</span>
+                <span id="res-confidence-pct">—</span>
+              </div>
+              <div class="confidence-bar bg-white/20">
+                <div id="res-confidence-fill" class="confidence-fill" style="width:0%"></div>
+              </div>
+            </div>
+            <p class="text-blue-200 text-xs" id="res-model">—</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Financial Metrics -->
+      <div>
+        <h3 class="text-slate-700 font-semibold text-sm uppercase tracking-wider mb-3 px-1">Financial Metrics</h3>
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div class="metric-card bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <p class="text-xs text-slate-500 mb-1">Revenue</p>
+            <p id="m-revenue" class="text-slate-800 font-bold text-base">—</p>
+            <p class="text-xs text-slate-400 mt-0.5">INR Crore</p>
+          </div>
+          <div class="metric-card bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <p class="text-xs text-slate-500 mb-1">Revenue Growth YoY</p>
+            <p id="m-revenue-growth" class="text-slate-800 font-bold text-base">—</p>
+            <p class="text-xs text-slate-400 mt-0.5">Year-on-year</p>
+          </div>
+          <div class="metric-card bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <p class="text-xs text-slate-500 mb-1">Net Profit</p>
+            <p id="m-profit" class="text-slate-800 font-bold text-base">—</p>
+            <p class="text-xs text-slate-400 mt-0.5">INR Crore</p>
+          </div>
+          <div class="metric-card bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <p class="text-xs text-slate-500 mb-1">Operating Margin</p>
+            <p id="m-op-margin" class="text-slate-800 font-bold text-base">—</p>
+            <p class="text-xs text-slate-400 mt-0.5">EBIT basis</p>
+          </div>
+          <div class="metric-card bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <p class="text-xs text-slate-500 mb-1">EBITDA Margin</p>
+            <p id="m-ebitda" class="text-slate-800 font-bold text-base">—</p>
+            <p class="text-xs text-slate-400 mt-0.5">EBITDA basis</p>
+          </div>
+          <div class="metric-card bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+            <p class="text-xs text-slate-500 mb-1">EPS</p>
+            <p id="m-eps" class="text-slate-800 font-bold text-base">—</p>
+            <p class="text-xs text-slate-400 mt-0.5">Basic (INR)</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Overall Outlook -->
+      <div class="bg-blue-50 border border-blue-100 rounded-xl p-5">
+        <div class="flex gap-2 items-start">
+          <svg class="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+          </svg>
+          <div>
+            <p class="text-blue-800 font-semibold text-sm mb-1">Overall Outlook</p>
+            <p id="res-outlook" class="text-blue-700 text-sm leading-relaxed">—</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Themes + Statements -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+        <!-- Key Themes -->
+        <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+          <h3 class="text-slate-700 font-semibold text-sm mb-3 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-blue-500 inline-block"></span>
+            Key Themes
+          </h3>
+          <div id="res-themes" class="flex flex-wrap gap-2">—</div>
+        </div>
+
+        <!-- Forward-Looking Statements -->
+        <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+          <h3 class="text-slate-700 font-semibold text-sm mb-3 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-cyan-500 inline-block"></span>
+            Management Statements
+          </h3>
+          <ul id="res-statements" class="space-y-2">—</ul>
+        </div>
+      </div>
+
+      <!-- Risks + Opportunities -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+        <!-- Risks -->
+        <div class="bg-white rounded-xl border border-red-100 p-5 shadow-sm">
+          <h3 class="text-slate-700 font-semibold text-sm mb-3 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-red-400 inline-block"></span>
+            Risks
+          </h3>
+          <ul id="res-risks" class="space-y-2">—</ul>
+        </div>
+
+        <!-- Opportunities -->
+        <div class="bg-white rounded-xl border border-green-100 p-5 shadow-sm">
+          <h3 class="text-slate-700 font-semibold text-sm mb-3 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-green-400 inline-block"></span>
+            Opportunities
+          </h3>
+          <ul id="res-opportunities" class="space-y-2">—</ul>
+        </div>
+      </div>
+
+      <!-- Market Snapshot (conditional) -->
+      <div id="market-section" class="hidden bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+        <h3 class="text-slate-700 font-semibold text-sm mb-3 flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-purple-500 inline-block"></span>
+          Live Market Snapshot
+        </h3>
+        <pre id="res-market" class="text-xs text-slate-600 bg-slate-50 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap"></pre>
+      </div>
+
+      <!-- Meta Footer -->
+      <div class="bg-slate-100 rounded-xl p-4 text-xs text-slate-500 flex flex-wrap gap-x-6 gap-y-1">
+        <span>Request ID: <span id="meta-request-id" class="font-mono text-slate-700">—</span></span>
+        <span>Model: <span id="meta-model" class="text-slate-700">—</span></span>
+        <span>Tools: <span id="meta-tools" class="text-slate-700">—</span></span>
+        <span>Analysis date: <span id="meta-date" class="text-slate-700">—</span></span>
+        <span>Sources: <span id="meta-sources" class="text-slate-700">—</span></span>
+      </div>
+
+      <!-- Run again -->
+      <div class="text-center">
+        <button onclick="resetUI()"
+          class="text-sm text-blue-600 hover:text-blue-800 font-medium underline underline-offset-2">
+          ← Run another forecast
+        </button>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    let marketEnabled = false;
+    let stepTimer = null;
+    let currentStep = 0;
+
+    const STEPS = [
+      'Downloading TCS financial documents...',
+      'Indexing into ChromaDB vector store...',
+      'Extracting financial metrics with Gemini...',
+      'Analysing earnings call transcripts (RAG)...',
+      'Synthesising forecast...',
+    ];
+    const STEP_DURATIONS = [30000, 40000, 30000, 30000, 20000]; // rough timings for visual
+
+    // ── Health check ──────────────────────────────────────────────────────────
+    async function checkHealth() {
+      try {
+        const r = await fetch('/health/capabilities');
+        const d = await r.json();
+        const dot = document.getElementById('health-dot');
+        const label = document.getElementById('health-label');
+        if (d.status === 'ok') {
+          dot.className = 'w-2 h-2 rounded-full bg-green-400';
+          label.textContent = d.db.connected ? 'All systems ready' : 'DB disconnected';
+          label.className = d.db.connected ? 'text-xs text-green-300' : 'text-xs text-yellow-300';
+        }
+      } catch (_) {
+        document.getElementById('health-dot').className = 'w-2 h-2 rounded-full bg-red-400';
+        document.getElementById('health-label').textContent = 'Server offline';
+      }
+    }
+
+    // ── Market toggle ─────────────────────────────────────────────────────────
+    function toggleMarket() {
+      marketEnabled = !marketEnabled;
+      const btn = document.getElementById('market-toggle');
+      const thumb = document.getElementById('market-thumb');
+      const label = document.getElementById('market-label');
+      if (marketEnabled) {
+        btn.classList.replace('bg-slate-200', 'bg-blue-500');
+        thumb.classList.replace('translate-x-1', 'translate-x-6');
+        label.textContent = 'Enabled';
+        label.className = 'text-sm text-blue-600 font-medium';
+      } else {
+        btn.classList.replace('bg-blue-500', 'bg-slate-200');
+        thumb.classList.replace('translate-x-6', 'translate-x-1');
+        label.textContent = 'Disabled';
+        label.className = 'text-sm text-slate-500';
+      }
+    }
+
+    // ── Step animation ────────────────────────────────────────────────────────
+    function advanceStep(idx) {
+      currentStep = idx;
+      const items = document.querySelectorAll('.step-item');
+      items.forEach((el, i) => {
+        const icon = el.querySelector('.step-icon');
+        const text = el.querySelector('span:last-child');
+        if (i < idx) {
+          icon.className = 'step-icon w-7 h-7 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0';
+          icon.innerHTML = '<svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>';
+          text.className = 'text-sm text-slate-400 line-through';
+        } else if (i === idx) {
+          icon.className = 'step-icon w-7 h-7 rounded-full border-2 border-blue-500 flex items-center justify-center flex-shrink-0';
+          icon.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px"></div>';
+          text.className = 'text-sm text-slate-800 font-medium';
+        } else {
+          icon.className = 'step-icon w-7 h-7 rounded-full border-2 border-slate-200 flex items-center justify-center flex-shrink-0';
+          icon.innerHTML = '<span class="text-xs text-slate-400">' + (i + 1) + '</span>';
+          text.className = 'text-sm text-slate-500';
+        }
+      });
+      if (idx < STEPS.length) {
+        document.getElementById('loading-step').textContent = STEPS[idx];
+      }
+    }
+
+    function startStepTimer() {
+      currentStep = 0;
+      advanceStep(0);
+      let accumulated = 0;
+      STEP_DURATIONS.forEach((dur, i) => {
+        accumulated += dur;
+        setTimeout(() => { if (i + 1 < STEPS.length) advanceStep(i + 1); }, accumulated);
+      });
+    }
+
+    // ── Main forecast call ────────────────────────────────────────────────────
+    async function runForecast() {
+      const ticker  = document.getElementById('ticker').value.trim().toUpperCase() || 'TCS';
+      const quarters = parseInt(document.getElementById('quarters').value);
+
+      // UI state: show loading
+      document.getElementById('form-section').classList.add('hidden');
+      document.getElementById('error-section').classList.add('hidden');
+      document.getElementById('results-section').classList.add('hidden');
+      document.getElementById('loading-section').classList.remove('hidden');
+      startStepTimer();
+
+      try {
+        const res = await fetch('/forecast/tcs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ticker,
+            quarters,
+            sources: ['screener', 'company-ir'],
+            include_market: marketEnabled,
+          }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.detail || `HTTP ${res.status}`);
+        }
+
+        renderResults(data, ticker);
+
+      } catch (err) {
+        document.getElementById('loading-section').classList.add('hidden');
+        document.getElementById('error-section').classList.remove('hidden');
+        document.getElementById('error-msg').textContent = err.message;
+        document.getElementById('form-section').classList.remove('hidden');
+      }
+    }
+
+    // ── Render results ────────────────────────────────────────────────────────
+    function renderResults(data, ticker) {
+      document.getElementById('loading-section').classList.add('hidden');
+
+      const r = data.result_json || {};
+      const fm = r.financial_metrics || {};
+      const qa = r.qualitative_analysis || {};
+      const meta = r._metadata || {};
+
+      // Banner
+      document.getElementById('res-quarter').textContent = r.quarter_forecast || 'N/A';
+      document.getElementById('res-ticker').textContent = ticker + ' · Tata Consultancy Services';
+
+      const tone = (qa.management_tone || 'unknown').toLowerCase();
+      const toneBadge = document.getElementById('res-tone-badge');
+      toneBadge.textContent = tone.charAt(0).toUpperCase() + tone.slice(1) + ' Tone';
+      toneBadge.className = 'px-3 py-1 rounded-full text-xs font-semibold ' +
+        (tone === 'positive' ? 'bg-green-500/30 text-green-100' :
+         tone === 'negative' ? 'bg-red-500/30 text-red-100' :
+         'bg-yellow-500/30 text-yellow-100');
+
+      const conf = parseFloat(r.confidence_score) || 0;
+      document.getElementById('res-confidence-pct').textContent = Math.round(conf * 100) + '%';
+      document.getElementById('res-confidence-fill').style.width = (conf * 100) + '%';
+      document.getElementById('res-model').textContent = 'Model: ' + (meta.llm_model || 'gemini');
+
+      // Financial metrics
+      document.getElementById('m-revenue').textContent       = fm.revenue_crore        || '—';
+      document.getElementById('m-revenue-growth').textContent = fm.revenue_growth_yoy  || '—';
+      document.getElementById('m-profit').textContent        = fm.net_profit_crore      || '—';
+      document.getElementById('m-op-margin').textContent     = fm.operating_margin      || '—';
+      document.getElementById('m-ebitda').textContent        = fm.ebitda_margin         || '—';
+      document.getElementById('m-eps').textContent           = fm.eps                   || '—';
+
+      // Outlook
+      document.getElementById('res-outlook').textContent = r.overall_outlook || '—';
+
+      // Key themes
+      const themesEl = document.getElementById('res-themes');
+      const themes = qa.key_themes || [];
+      themesEl.innerHTML = themes.length
+        ? themes.map(t => `<span class="bg-blue-100 text-blue-700 text-xs px-2.5 py-1 rounded-full font-medium">${esc(t)}</span>`).join('')
+        : '<span class="text-slate-400 text-sm">No themes extracted</span>';
+
+      // Forward-looking statements
+      renderList('res-statements', qa.forward_looking_statements, 'text-slate-600 italic', '💬');
+
+      // Risks
+      renderList('res-risks', qa.risks, 'text-red-700', '⚠');
+
+      // Opportunities
+      renderList('res-opportunities', qa.opportunities, 'text-green-700', '✓');
+
+      // Market snapshot
+      if (r.market_snapshot && r.market_snapshot !== null) {
+        document.getElementById('market-section').classList.remove('hidden');
+        document.getElementById('res-market').textContent =
+          typeof r.market_snapshot === 'object'
+            ? JSON.stringify(r.market_snapshot, null, 2)
+            : r.market_snapshot;
+      }
+
+      // Meta footer
+      document.getElementById('meta-request-id').textContent = data.request_id || '—';
+      document.getElementById('meta-model').textContent      = meta.llm_model || '—';
+      document.getElementById('meta-tools').textContent      = (data.tools_used || []).join(', ') || '—';
+      document.getElementById('meta-date').textContent       = meta.analysis_date
+        ? new Date(meta.analysis_date).toLocaleString() : '—';
+      document.getElementById('meta-sources').textContent    = (r.source_documents || []).length
+        + ' document(s)';
+
+      document.getElementById('results-section').classList.remove('hidden');
+    }
+
+    function renderList(elId, items, textClass, icon) {
+      const el = document.getElementById(elId);
+      if (!items || !items.length) {
+        el.innerHTML = '<li class="text-slate-400 text-sm">None identified</li>';
+        return;
+      }
+      el.innerHTML = items.map(item =>
+        `<li class="flex items-start gap-2 text-sm">
+           <span class="flex-shrink-0 mt-0.5">${icon}</span>
+           <span class="${textClass}">${esc(item)}</span>
+         </li>`
+      ).join('');
+    }
+
+    function esc(str) {
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function resetUI() {
+      document.getElementById('results-section').classList.add('hidden');
+      document.getElementById('error-section').classList.add('hidden');
+      document.getElementById('market-section').classList.add('hidden');
+      document.getElementById('form-section').classList.remove('hidden');
+    }
+
+    // Init
+    checkHealth();
+  </script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 """
-app/main.py – FastAPI application entry point.
+app/main.py - FastAPI application entry point.
 """
 
 import logging
@@ -7,6 +7,8 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.endpoints import router
 from app.db.mysql_client import get_mysql_client
@@ -16,6 +18,8 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
 def create_app() -> FastAPI:
@@ -38,6 +42,14 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Serve the dashboard UI at /
+    @app.get("/", include_in_schema=False)
+    async def ui():
+        return FileResponse(os.path.join(_STATIC_DIR, "index.html"))
+
+    # Mount static assets (CSS, JS, images if added later)
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
     app.include_router(router)
 
