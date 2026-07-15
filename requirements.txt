@@ -1,0 +1,32 @@
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi==0.115.5
+uvicorn[standard]==0.32.0
+
+# ── Data validation ───────────────────────────────────────────────────────────
+pydantic==2.9.2
+pydantic-settings==2.6.1
+
+# ── LangChain (required by task spec) ────────────────────────────────────────
+langchain>=0.3.7,<0.4.0
+langchain-core>=0.3.75,<0.4.0
+langchain-google-genai==2.1.12
+langchain-chroma==0.1.4
+
+# ── Vector store ──────────────────────────────────────────────────────────────
+chromadb==0.5.18
+
+# ── PDF extraction ────────────────────────────────────────────────────────────
+pdfplumber==0.11.4
+pytesseract==0.3.13          # OCR fallback
+pdf2image==1.17.0             # OCR fallback (requires poppler system package)
+
+# ── Database ──────────────────────────────────────────────────────────────────
+sqlalchemy==2.0.36
+aiomysql==0.2.0              # async MySQL driver for SQLAlchemy
+
+# ── HTTP + utilities ──────────────────────────────────────────────────────────
+httpx==0.27.2
+python-dotenv==1.0.1
+
+# ── Market data (bonus tool) ──────────────────────────────────────────────────
+yfinance==0.2.44
